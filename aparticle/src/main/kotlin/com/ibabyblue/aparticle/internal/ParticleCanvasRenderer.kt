@@ -1,24 +1,35 @@
 package com.ibabyblue.aparticle.internal
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffColorFilter
 import android.graphics.RadialGradient
 import android.graphics.Rect
 import android.graphics.Shader
 import android.graphics.drawable.Drawable
+import android.util.LruCache
 import com.ibabyblue.aparticle.ParticleColor
 import com.ibabyblue.aparticle.ParticleShape
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.ceil
 import kotlin.math.max
+import kotlin.math.round
 import kotlin.math.sin
 
 internal class ParticleCanvasRenderer(private val context: Context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val drawableCache = mutableMapOf<Int, Drawable?>()
+    // Rasterize soft shape shadows once; bitmap shadows also work on hardware Canvas.
+    private val sparkleSprites = object : LruCache<SparkleSpriteKey, Bitmap>(8 * 1024 * 1024) {
+        override fun sizeOf(key: SparkleSpriteKey, value: Bitmap): Int = value.allocationByteCount
+    }
+    private val sparkleTints = LruCache<ParticleColor, PorterDuffColorFilter>(16)
 
     fun drawRiseAndBurst(canvas: Canvas, snapshot: RiseAndBurstSnapshot) {
         snapshot.trails.forEach { drawParticle(canvas, it) }
@@ -49,6 +60,7 @@ internal class ParticleCanvasRenderer(private val context: Context) {
     }
 
     private fun drawBubbles(canvas: Canvas, snapshot: AtmosphereSnapshot) {
+        paint.alpha = 255
         snapshot.bubbles.forEach { bubble ->
             val edgeColor = snapshot.glowColor.withMultipliedAlpha(
                 bubble.opacity * snapshot.glowIntensity,
@@ -57,7 +69,7 @@ internal class ParticleCanvasRenderer(private val context: Context) {
                 bubble.x,
                 bubble.y,
                 max(1f, bubble.radiusPx),
-                intArrayOf(0x00000000, 0x00000000, edgeColor),
+                intArrayOf(snapshot.glowColor.withMultipliedAlpha(0f), snapshot.glowColor.withMultipliedAlpha(0f), edgeColor),
                 floatArrayOf(0f, 0.85f, 1f),
                 Shader.TileMode.CLAMP,
             )
@@ -68,39 +80,57 @@ internal class ParticleCanvasRenderer(private val context: Context) {
 
     private fun drawSparkles(canvas: Canvas, snapshot: AtmosphereSnapshot) {
         snapshot.sparkles.forEach { sparkle ->
-            val coreSize = when (sparkle.kind) {
-                SparkleKind.Dot -> max(2f, sparkle.sizePx * 1.8f)
-                SparkleKind.FourPoint -> max(2f, sparkle.sizePx * 3.2f)
-            }
+            // Share masks across colors and 1/8 dp size buckets. Random per-particle
+            // sizes otherwise evict the whole sprite cache on dense/high-DPI scenes.
+            val size = round(sparkle.sizePx / sparkle.density * 8f) / 8f * sparkle.density
+            val key = SparkleSpriteKey(size, sparkle.kind, sparkle.density)
+            val sprite = sparkleSprites.get(key) ?: makeSparkleSprite(key).also { sparkleSprites.put(key, it) }
             paint.shader = null
-            paint.color = sparkle.color.withMultipliedAlpha(sparkle.opacity * 0.20f)
-            canvas.drawCircle(sparkle.x, sparkle.y, coreSize * 1.7f, paint)
-            when (sparkle.kind) {
-                SparkleKind.Dot -> drawCircle(
-                    canvas,
-                    sparkle.x,
-                    sparkle.y,
-                    coreSize / 2f,
-                    sparkle.color,
-                    sparkle.opacity,
-                )
-                SparkleKind.FourPoint -> {
-                    paint.color = sparkle.color.withMultipliedAlpha(sparkle.opacity)
-                    canvas.drawPath(fourPointPath(sparkle.x, sparkle.y, coreSize), paint)
-                }
-            }
+            paint.colorFilter = sparkleTints.get(sparkle.color) ?: PorterDuffColorFilter(
+                sparkle.color.argb, PorterDuff.Mode.SRC_IN,
+            ).also { sparkleTints.put(sparkle.color, it) }
+            paint.alpha = (sparkle.opacity * 255f).toInt().coerceIn(0, 255)
+            canvas.drawBitmap(sprite, sparkle.x - sprite.width / 2f, sparkle.y - sprite.height / 2f, paint)
         }
+        paint.colorFilter = null
+    }
+
+    private data class SparkleSpriteKey(
+        val size: Float,
+        val kind: SparkleKind,
+        val density: Float,
+    )
+
+    private fun makeSparkleSprite(key: SparkleSpriteKey): Bitmap {
+        val coreSize = max(2f * key.density, key.size * if (key.kind == SparkleKind.Dot) 1.8f else 3.2f)
+        val blurRadius = max(2f * key.density, key.size * 2.5f)
+        // CALayer's default shadow offset is (0, -3) points.
+        val shadowOffset = -3f * key.density
+        val extent = ceil(coreSize + 6f * blurRadius + 2f * kotlin.math.abs(shadowOffset)).toInt().coerceAtLeast(1)
+        val bitmap = Bitmap.createBitmap(extent, extent, Bitmap.Config.ARGB_8888)
+        val spriteCanvas = Canvas(bitmap)
+        val spritePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE
+            setShadowLayer(blurRadius, 0f, shadowOffset, ParticleColor.White.withMultipliedAlpha(0.9f))
+        }
+        val center = extent / 2f
+        when (key.kind) {
+            SparkleKind.Dot -> spriteCanvas.drawCircle(center, center, coreSize / 2f, spritePaint)
+            SparkleKind.FourPoint -> spriteCanvas.drawPath(fourPointPath(center, center, coreSize), spritePaint)
+        }
+        return bitmap
     }
 
     private fun drawEdgeGlows(canvas: Canvas, snapshot: AtmosphereSnapshot) {
+        paint.alpha = 255
         val width = snapshot.widthPx
         val height = snapshot.heightPx
         if (width <= 0f || height <= 0f) return
         val intensity = snapshot.glowIntensity
         val breath = snapshot.breath
-        val bottomAlpha = ((0.45f + 0.70f * breath) * intensity).coerceIn(0f, 1f)
-        val sideAlpha = ((0.38f + 0.62f * breath) * intensity).coerceIn(0f, 1f)
-        val topAlpha = ((0.20f + 0.45f * breath) * intensity).coerceIn(0f, 1f)
+        val bottomAlpha = glowOpacity(0.45f, 1.15f, breath, intensity)
+        val sideAlpha = glowOpacity(0.38f, 1f, breath, intensity)
+        val topAlpha = glowOpacity(0.20f, 0.65f, breath, intensity)
 
         val bottomStart = height * 0.38f
         paint.shader = LinearGradient(
@@ -109,7 +139,7 @@ internal class ParticleCanvasRenderer(private val context: Context) {
             0f,
             height,
             intArrayOf(
-                0x00000000,
+                snapshot.glowColor.withMultipliedAlpha(0f),
                 snapshot.glowColor.withMultipliedAlpha(bottomAlpha * 0.55f),
                 snapshot.glowColor.withMultipliedAlpha(bottomAlpha * 0.88f),
                 snapshot.glowColor.withMultipliedAlpha(bottomAlpha),
@@ -129,7 +159,7 @@ internal class ParticleCanvasRenderer(private val context: Context) {
             0f,
             0f,
             topHeight,
-            intArrayOf(snapshot.glowColor.withMultipliedAlpha(topAlpha * 0.90f), 0x00000000),
+            intArrayOf(snapshot.glowColor.withMultipliedAlpha(topAlpha * 0.90f), snapshot.glowColor.withMultipliedAlpha(0f)),
             null,
             Shader.TileMode.CLAMP,
         )
@@ -159,7 +189,7 @@ internal class ParticleCanvasRenderer(private val context: Context) {
             intArrayOf(
                 color.withMultipliedAlpha(alpha * 0.95f),
                 color.withMultipliedAlpha(alpha * 0.50f),
-                0x00000000,
+                color.withMultipliedAlpha(0f),
             ),
             floatArrayOf(0f, 0.35f, 1f),
             Shader.TileMode.CLAMP,
@@ -176,10 +206,8 @@ internal class ParticleCanvasRenderer(private val context: Context) {
         breath: Float,
         intensity: Float,
     ) {
-        val inner = (((if (right) 0.30f else 0.35f) + (if (right) 0.60f else 0.65f) * breath) * intensity)
-            .coerceIn(0f, 1f)
-        val middle = (((if (right) 0.18f else 0.20f) + (if (right) 0.36f else 0.40f) * breath) * intensity)
-            .coerceIn(0f, 1f)
+        val inner = glowOpacity(if (right) 0.30f else 0.35f, if (right) 0.90f else 1f, breath, intensity)
+        val middle = inner * 0.60f
         paint.shader = RadialGradient(
             if (right) width else 0f,
             height,
@@ -187,12 +215,19 @@ internal class ParticleCanvasRenderer(private val context: Context) {
             intArrayOf(
                 color.withMultipliedAlpha(inner),
                 color.withMultipliedAlpha(middle),
-                0x00000000,
+                color.withMultipliedAlpha(0f),
             ),
             floatArrayOf(0f, 0.45f, 1f),
             Shader.TileMode.CLAMP,
         )
         canvas.drawRect(0f, 0f, width, height, paint)
+    }
+
+    private fun glowOpacity(low: Float, high: Float, breath: Float, intensity: Float): Float {
+        // Core Animation clamps the two endpoints before interpolating layer opacity.
+        val from = (low * intensity).coerceIn(0f, 1f)
+        val to = (high * intensity).coerceIn(0f, 1f)
+        return from + (to - from) * breath
     }
 
     private fun drawDrawable(

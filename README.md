@@ -20,10 +20,22 @@ Compose 与 View 共用确定性粒子规划和物理模拟，但各自拥有原
 
 ## 安装
 
-发布后的 Maven 坐标：
+通过 JitPack 使用已发布的 Git tag。在 `settings.gradle.kts` 的依赖仓库中添加：
 
 ```kotlin
-implementation("io.github.ibabyblue:aparticle:0.1.0")
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+        maven("https://jitpack.io")
+    }
+}
+```
+
+然后添加依赖（Mira 使用相同坐标）：
+
+```kotlin
+implementation("com.github.ibabyblue:AParticle:0.1.1")
 ```
 
 本地验证或发布到 Maven Local：
@@ -31,6 +43,15 @@ implementation("io.github.ibabyblue:aparticle:0.1.0")
 ```bash
 ./gradlew :aparticle:publishToMavenLocal
 ```
+
+Maven Local 使用 `io.github.ibabyblue:aparticle:0.1.1`，消费时需要 `mavenLocal()`。
+该坐标不代表已发布到 Maven Central。
+
+### 从 0.1.0 升级
+
+`0.1.1` 修复 Kiss 使用的 `atmosphere` 渲染并对齐 iOS UIKit 动画节奏，公开 API 不变。
+Mira 只需将版本目录中的 `aparticle` 升为 `0.1.1`，保留现有颜色、密度、5 秒呼吸周期
+和命中后播放 3 秒的业务逻辑。完整变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## Jetpack Compose
 
@@ -124,6 +145,10 @@ View 本身不可点击、不可聚焦，`onTouchEvent` 始终返回 `false`。`
 `AtmosphereConfiguration` 公开光晕颜色、星光颜色、两类密度、光晕强度和呼吸周期。
 元素数量按当前画布的 dp 面积计算，星光最多 320 个、气泡最多 32 个；密度为 0 时省略
 对应层。所有颜色都保留源 alpha，并与每帧透明度相乘。
+
+氛围的动画节奏以 Mira 使用的 iOS `IParticleView`（UIKit）为准：光晕从低亮度开始，
+在半个呼吸周期到达峰值，再返回低亮度；星光闪烁、气泡呼吸和漂移使用相同的关键帧规则。
+星光包含模糊柔光，气泡内部前 85% 半径透明、外侧渐亮。随机布局不保证两端逐粒子相同。
 
 ## 布局、生命周期与无障碍
 

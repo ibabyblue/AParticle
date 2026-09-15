@@ -6,6 +6,7 @@ import kotlin.math.PI
 import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.floor
+import kotlin.math.max
 import kotlin.math.sin
 
 internal enum class SparkleKind { Dot, FourPoint }
@@ -48,6 +49,7 @@ internal data class AtmospherePlan(
     val configuration: ResolvedAtmosphereConfiguration,
     val sparkles: List<SparklePlan>,
     val bubbles: List<BubblePlan>,
+    val density: Float = 1f,
 ) {
     companion object {
         fun make(
@@ -75,7 +77,7 @@ internal data class AtmospherePlan(
             val bubbles = List(bubbleCount) { index ->
                 makeBubble(index, bubbleCount, safeDensity, random)
             }
-            return AtmospherePlan(seed, startNanos, configuration, sparkles, bubbles)
+            return AtmospherePlan(seed, startNanos, configuration, sparkles, bubbles, safeDensity)
         }
 
         private fun makeSparkle(
@@ -159,6 +161,7 @@ internal data class SparkleSnapshot(
     val opacity: Float,
     val color: ParticleColor,
     val kind: SparkleKind,
+    val density: Float = 1f,
 )
 
 internal data class BubbleSnapshot(
@@ -186,7 +189,8 @@ internal object AtmosphereSimulation {
         elapsedSeconds: Float,
     ): AtmosphereSnapshot {
         val time = if (elapsedSeconds.isFinite()) elapsedSeconds.coerceAtLeast(0f) else 0f
-        val breath = 0.5f + 0.5f * sin(time * 2f * PI.toFloat() / plan.configuration.breathingDuration)
+        // Mira uses IParticleView: linear, autoreversing Core Animation keyframes.
+        val breath = triangle(time / plan.configuration.breathingDuration)
         return AtmosphereSnapshot(
             widthPx = widthPx,
             heightPx = heightPx,
@@ -195,31 +199,51 @@ internal object AtmosphereSimulation {
             breath = breath.coerceIn(0f, 1f),
             sparkles = plan.sparkles.map { sparkle ->
                 SparkleSnapshot(
-                    x = sparkle.normalizedX * widthPx +
-                        sin(time * 0.18f + sparkle.driftPhase) * sparkle.driftAmplitudeX,
-                    y = sparkle.normalizedY * heightPx +
-                        cos(time * 0.13f + sparkle.driftPhase * 1.3f) * sparkle.driftAmplitudeY,
+                    x = sparkle.normalizedX * widthPx + keyframeDrift(time * 0.18f / TWO_PI) {
+                        sin(it + sparkle.driftPhase) * sparkle.driftAmplitudeX
+                    },
+                    y = sparkle.normalizedY * heightPx + keyframeDrift(time * 0.18f / TWO_PI) {
+                        cos(it + sparkle.driftPhase) * sparkle.driftAmplitudeY
+                    },
                     sizePx = sparkle.sizePx,
-                    opacity = (sparkle.baseAlpha *
-                        (0.25f + 0.75f * kotlin.math.abs(sin(time * sparkle.twinkleSpeed + sparkle.phase))))
-                        .coerceIn(0f, 1f),
+                    // CAKeyframeAnimation replaces the model layer's baseAlpha.
+                    opacity = 0.25f + 0.75f * triangle((time * sparkle.twinkleSpeed + sparkle.phase) / PI.toFloat()),
                     color = sparkle.color,
                     kind = sparkle.kind,
+                    density = plan.density,
                 )
             },
             bubbles = plan.bubbles.map { bubble ->
                 BubbleSnapshot(
-                    x = bubble.normalizedX * widthPx +
-                        sin(time * bubble.driftFrequencyX + bubble.phase) * bubble.driftAmplitudeX,
-                    y = bubble.normalizedY * heightPx +
-                        cos(time * bubble.driftFrequencyY + bubble.phase * 1.2f) * bubble.driftAmplitudeY,
+                    x = bubble.normalizedX * widthPx + keyframeDrift(time / max(16f, TWO_PI / bubble.driftFrequencyX)) {
+                        sin(it + bubble.phase) * bubble.driftAmplitudeX
+                    },
+                    y = bubble.normalizedY * heightPx + keyframeDrift(time / max(16f, TWO_PI / bubble.driftFrequencyX)) {
+                        cos((it + bubble.phase) * 0.82f) * bubble.driftAmplitudeY
+                    },
                     radiusPx = bubble.radiusPx,
                     opacity = (bubble.baseAlpha *
-                        (0.65f + 0.35f * sin(time * bubble.breathingSpeed + bubble.breathingPhase)))
+                        (0.65f + 0.35f * triangle((time * bubble.breathingSpeed + bubble.breathingPhase) / TWO_PI)))
                         .coerceIn(0f, 1f),
                 )
             },
         )
+    }
+
+    private val TWO_PI = 2f * PI.toFloat()
+
+    private fun triangle(cycles: Float): Float {
+        val progress = cycles - floor(cycles)
+        return 1f - kotlin.math.abs(2f * progress - 1f)
+    }
+
+    /** UIKit interpolates nine sampled positions over eight linear segments. */
+    private inline fun keyframeDrift(cycles: Float, valueAtAngle: (Float) -> Float): Float {
+        val segment = (cycles - floor(cycles)) * 8f
+        val index = floor(segment)
+        val from = valueAtAngle(index * TWO_PI / 8f)
+        val to = valueAtAngle((index + 1f) * TWO_PI / 8f)
+        return from + (to - from) * (segment - index)
     }
 }
 

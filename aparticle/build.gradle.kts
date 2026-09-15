@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "io.github.ibabyblue"
-version = "0.1.0"
+version = "0.1.1"
 
 android {
     namespace = "com.ibabyblue.aparticle"
@@ -34,6 +34,7 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+        unitTests.isIncludeAndroidResources = true
     }
 }
 
@@ -48,6 +49,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
 
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
 }
 
 afterEvaluate {

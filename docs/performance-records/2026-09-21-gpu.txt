@@ -1,0 +1,4 @@
+backend=gpu run=0 frames=165 drawP50=3.499077 drawP95=6.157616 drawMax=8.615692 gapP95=11.691077 gapsOver25=0 totalP95=20.938346 gpuP95=12.071308 issueP95=3.29177 syncP95=2.623154 missed=0/165 dropped=0
+backend=gpu run=1 frames=165 drawP50=4.183077 drawP95=6.000308 drawMax=6.895384 gapP95=11.621846 gapsOver25=0 totalP95=23.416576 gpuP95=11.900616 issueP95=4.857462 syncP95=3.049847 missed=0/165 dropped=0
+backend=gpu run=2 frames=164 drawP50=3.669846 drawP95=5.483693 drawMax=22.389308 gapP95=11.752538 gapsOver25=0 totalP95=23.044823 gpuP95=11.898231 issueP95=4.020077 syncP95=2.677308 missed=0/164 dropped=0
+FRAME_BUDGET=PASS

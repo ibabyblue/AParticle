@@ -17,3 +17,4 @@ dependencyResolutionManagement {
 rootProject.name = "AParticle"
 include(":aparticle")
 include(":example")
+include(":benchmark")

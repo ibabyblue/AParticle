@@ -9,6 +9,8 @@ import android.view.View
 import com.ibabyblue.aparticle.internal.AnimatorScaleObserver
 import com.ibabyblue.aparticle.internal.AtmospherePlan
 import com.ibabyblue.aparticle.internal.AtmosphereSimulation
+import com.ibabyblue.aparticle.internal.CelebrationCanvasRenderer
+import com.ibabyblue.aparticle.internal.CelebrationPlan
 import com.ibabyblue.aparticle.internal.ParticleCanvasRenderer
 import com.ibabyblue.aparticle.internal.ParticleSimulation
 import com.ibabyblue.aparticle.internal.RiseAndBurstPlan
@@ -20,7 +22,8 @@ import kotlin.math.abs
  *
  * The view never consumes touch events. It owns concurrent playbacks until
  * they finish, are stopped, the view detaches, the window becomes invisible,
- * or the system animator scale becomes zero.
+ * or the system animator scale becomes zero. Celebration is restartable and
+ * permits a new stationary fade while system animations remain disabled.
  */
 public class AParticleView @JvmOverloads constructor(
     context: Context,
@@ -34,14 +37,22 @@ public class AParticleView @JvmOverloads constructor(
         var startNanos: Long = 0L,
         var risePlan: RiseAndBurstPlan? = null,
         var atmospherePlan: AtmospherePlan? = null,
+        var celebrationPlan: CelebrationPlan? = null,
     )
 
     private val renderer = ParticleCanvasRenderer(context)
+    private val celebrationRenderer = CelebrationCanvasRenderer()
     private val records = linkedMapOf<Long, Record>()
     private var animationsEnabled = true
     private val animatorScaleObserver = AnimatorScaleObserver(context) { enabled ->
+        if (animationsEnabled != enabled) {
+            if (!enabled) stopAll()
+            else {
+                records.values.removeAll { it.effect is ParticleEffect.Celebration }
+                invalidate()
+            }
+        }
         animationsEnabled = enabled
-        if (!enabled) stopAll()
     }
 
     init {
@@ -58,11 +69,16 @@ public class AParticleView @JvmOverloads constructor(
      * Starts one independent playback and returns its cancellation identity.
      *
      * A request made before positive layout is retained in insertion order.
-     * When the system animator scale is zero, this is a safe no-op.
+     * Celebration replaces the prior celebration, leaving other effect families alone.
+     * With system animator scale zero, celebration uses a stationary 0.8-second
+     * star fade; other effects are safe no-ops. Call on the main thread.
      */
     public fun play(effect: ParticleEffect): ParticlePlayback {
         val playback = ParticlePlayback(nextPlaybackId.getAndIncrement())
-        if (!animationsEnabled) return playback
+        if (!animationsEnabled && effect !is ParticleEffect.Celebration) return playback
+        if (effect is ParticleEffect.Celebration) {
+            records.values.removeAll { it.effect is ParticleEffect.Celebration }
+        }
         val record = Record(
             playback = playback,
             effect = effect,
@@ -108,7 +124,11 @@ public class AParticleView @JvmOverloads constructor(
 
     override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
         super.onSizeChanged(width, height, oldWidth, oldHeight)
-        if (width <= 0 || height <= 0) return
+        if (width <= 0 || height <= 0) {
+            records.values.removeAll { it.effect is ParticleEffect.Celebration && it.startNanos != 0L }
+            invalidate()
+            return
+        }
         val materialChange = oldWidth > 0 && oldHeight > 0 &&
             (abs(width - oldWidth) > 1 || abs(height - oldHeight) > 1)
         val now = System.nanoTime()
@@ -117,7 +137,7 @@ public class AParticleView @JvmOverloads constructor(
             val record = iterator.next()
             when {
                 record.startNanos == 0L -> buildPlan(record, now)
-                materialChange && record.effect is ParticleEffect.RiseAndBurst -> iterator.remove()
+                materialChange && (record.effect is ParticleEffect.RiseAndBurst || record.effect is ParticleEffect.Celebration) -> iterator.remove()
                 materialChange && record.effect is ParticleEffect.Atmosphere -> buildPlan(record, record.startNanos)
             }
         }
@@ -126,13 +146,21 @@ public class AParticleView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        if (!animationsEnabled || width <= 0 || height <= 0) return
+        if (width <= 0 || height <= 0) return
         val now = System.nanoTime()
         val iterator = records.values.iterator()
         while (iterator.hasNext()) {
             val record = iterator.next()
             if (record.startNanos == 0L) buildPlan(record, now)
             val elapsed = (now - record.startNanos).coerceAtLeast(0L) / 1_000_000_000f
+            record.celebrationPlan?.let { plan ->
+                if (elapsed >= plan.duration) {
+                    iterator.remove()
+                } else {
+                    celebrationRenderer.draw(canvas, plan, width.toFloat(), height.toFloat(),
+                        resources.displayMetrics.density, elapsed)
+                }
+            }
             record.risePlan?.let { plan ->
                 if (elapsed > plan.totalDurationSeconds) {
                     iterator.remove()
@@ -154,6 +182,10 @@ public class AParticleView @JvmOverloads constructor(
         if (width <= 0 || height <= 0) return
         record.startNanos = startNanos
         when (val effect = record.effect) {
+            is ParticleEffect.Celebration -> {
+                celebrationRenderer.prepare()
+                record.celebrationPlan = CelebrationPlan(startNanos, !animationsEnabled, record.seed, effect.configuration)
+            }
             is ParticleEffect.RiseAndBurst -> {
                 record.atmospherePlan = null
                 record.risePlan = RiseAndBurstPlan.make(

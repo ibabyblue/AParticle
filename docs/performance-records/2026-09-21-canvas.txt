@@ -1,0 +1,4 @@
+backend=canvas run=0 frames=129 drawP50=4.271077 drawP95=6.864923 drawMax=7.523308 gapP95=21.312615 gapsOver25=1 totalP95=62.885936 gpuP95=14.248308 issueP95=20.023462 syncP95=1.296077 missed=22/130 dropped=0
+backend=canvas run=1 frames=131 drawP50=3.807077 drawP95=6.822154 drawMax=7.331077 gapP95=21.894846 gapsOver25=0 totalP95=64.229176 gpuP95=11.211 issueP95=20.020615 syncP95=1.258077 missed=22/132 dropped=0
+backend=canvas run=2 frames=131 drawP50=4.170384 drawP95=6.418384 drawMax=15.963 gapP95=22.379692 gapsOver25=0 totalP95=67.671142 gpuP95=11.954153 issueP95=20.423693 syncP95=1.297231 missed=23/131 dropped=0
+FRAME_BUDGET=FAIL

@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:label="AParticle Benchmark" android:theme="@android:style/Theme.Material.NoActionBar" android:hardwareAccelerated="true">
+        <activity android:name="com.ibabyblue.aparticle.internal.CelebrationBenchmarkActivity" android:exported="false" />
+    </application>
+    <instrumentation android:name="com.ibabyblue.aparticle.internal.CelebrationBenchmark"
+        android:targetPackage="com.ibabyblue.aparticle.benchmark" android:functionalTest="true" />
+</manifest>

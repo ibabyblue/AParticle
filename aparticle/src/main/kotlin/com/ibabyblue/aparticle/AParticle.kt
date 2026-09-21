@@ -5,6 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -24,6 +25,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.ibabyblue.aparticle.internal.AnimatorScaleObserver
 import com.ibabyblue.aparticle.internal.AtmospherePlan
 import com.ibabyblue.aparticle.internal.AtmosphereSimulation
+import com.ibabyblue.aparticle.internal.CelebrationCanvasRenderer
+import com.ibabyblue.aparticle.internal.CelebrationPlan
 import com.ibabyblue.aparticle.internal.ParticleCanvasRenderer
 import com.ibabyblue.aparticle.internal.ParticleSimulation
 import com.ibabyblue.aparticle.internal.RiseAndBurstPlan
@@ -38,9 +41,13 @@ import kotlin.math.abs
  * A [ParticleEffect.Atmosphere] requires a Boolean trigger: `true` activates
  * it and `false` stops it. A non-Boolean atmosphere trigger is a safe no-op.
  *
+ * A [ParticleEffect.Celebration] also registers its initial trigger silently;
+ * each later distinct value replaces the previous celebration. System animation
+ * scale zero selects twelve stationary fading stars for this effect only.
+ *
  * The layer follows [modifier]'s bounds, does not affect sibling layout, does
  * not install pointer input, and clears animation when its lifecycle stops or
- * the system animator scale becomes zero.
+ * the system animator scale changes (celebration) or becomes zero (other effects).
  */
 @Composable
 public fun AParticle(
@@ -51,6 +58,9 @@ public fun AParticle(
     val animationsEnabled = rememberAnimationsEnabled()
     val lifecycleActive = rememberLifecycleActive()
     when (effect) {
+        is ParticleEffect.Celebration -> CelebrationParticleCanvas(
+            effect, trigger, animationsEnabled, lifecycleActive, modifier,
+        )
         is ParticleEffect.RiseAndBurst -> TransientParticleCanvas(
             effect = effect,
             trigger = trigger,
@@ -65,6 +75,69 @@ public fun AParticle(
             lifecycleActive = lifecycleActive,
             modifier = modifier,
         )
+    }
+}
+
+@Composable
+private fun CelebrationParticleCanvas(
+    effect: ParticleEffect.Celebration,
+    trigger: Any?,
+    animationsEnabled: Boolean,
+    lifecycleActive: Boolean,
+    modifier: Modifier,
+) {
+    val density = LocalDensity.current.density
+    val renderer = remember { CelebrationCanvasRenderer() }
+    val ledger = remember { TriggerLedger(trigger) }
+    var plan by remember { mutableStateOf<CelebrationPlan?>(null) }
+    var pending by remember { mutableStateOf<CelebrationConfiguration?>(null) }
+    var size by remember { mutableStateOf(IntSize.Zero) }
+    var frameNanos by remember { mutableLongStateOf(0L) }
+    var previousEnabled by remember { mutableStateOf(animationsEnabled) }
+    var previousDensity by remember { mutableFloatStateOf(density) }
+
+    LaunchedEffect(trigger, animationsEnabled, lifecycleActive, density) {
+        val changed = ledger.observe(trigger)
+        if (!lifecycleActive || previousEnabled != animationsEnabled || previousDensity != density) {
+            plan = null
+            pending = null
+        }
+        previousEnabled = animationsEnabled
+        previousDensity = density
+        if (changed && lifecycleActive) {
+            if (size.width > 0 && size.height > 0) {
+                renderer.prepare()
+                plan = CelebrationPlan(System.nanoTime(), !animationsEnabled, nextSeed(0), effect.configuration)
+            } else {
+                pending = effect.configuration
+            }
+        }
+    }
+    LaunchedEffect(plan) {
+        val current = plan ?: return@LaunchedEffect
+        while (plan === current) {
+            frameNanos = withFrameNanos { it }
+            if (elapsedSeconds(frameNanos, current.startNanos) >= current.duration) plan = null
+        }
+    }
+    Canvas(modifier.onSizeChanged { newSize ->
+        val changed = size.width > 0 && size.height > 0 &&
+            (abs(size.width - newSize.width) > 1 || abs(size.height - newSize.height) > 1)
+        size = newSize
+        if (changed || newSize.width <= 0 || newSize.height <= 0) plan = null
+        if (changed) pending = null
+        if (newSize.width > 0 && newSize.height > 0 && lifecycleActive) {
+            pending?.let { configuration ->
+                renderer.prepare()
+                plan = CelebrationPlan(System.nanoTime(), !animationsEnabled, nextSeed(0), configuration)
+                pending = null
+            }
+        }
+    }) {
+        plan?.let { current ->
+            renderer.draw(drawContext.canvas.nativeCanvas, current, size.width.toFloat(), size.height.toFloat(),
+                density, elapsedSeconds(frameNanos, current.startNanos))
+        }
     }
 }
 
@@ -255,7 +328,7 @@ private fun nextSeed(salt: Int): Long = System.nanoTime() xor (salt.toLong() shl
 @Composable
 private fun rememberAnimationsEnabled(): Boolean {
     val context = LocalContext.current
-    var enabled by remember(context) { mutableStateOf(true) }
+    var enabled by remember(context) { mutableStateOf(AnimatorScaleObserver(context) {}.animationsEnabled) }
     val observer = remember(context) {
         AnimatorScaleObserver(context) { enabled = it }
     }

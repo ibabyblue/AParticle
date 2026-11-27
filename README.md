@@ -36,7 +36,7 @@ dependencyResolutionManagement {
 然后添加依赖（Mira 使用相同坐标）：
 
 ```kotlin
-implementation("com.github.ibabyblue:AParticle:0.2.0")
+implementation("com.github.ibabyblue:AParticle:0.3.0")
 ```
 
 本地验证或发布到 Maven Local：
@@ -45,13 +45,13 @@ implementation("com.github.ibabyblue:AParticle:0.2.0")
 ./gradlew :aparticle:publishToMavenLocal
 ```
 
-Maven Local 使用 `io.github.ibabyblue:aparticle:0.2.0`，消费时需要 `mavenLocal()`。
+Maven Local 使用 `io.github.ibabyblue:aparticle:0.3.0`，消费时需要 `mavenLocal()`。
 该坐标不代表已发布到 Maven Central。
 
 ### 从 0.1.x 升级
 
 `0.2.0` 新增 `ParticleEffect.celebration()`，原有上升爆炸和 Kiss 氛围 API 保持兼容。
-Mira 将版本目录中的 `aparticle` 升为 `0.2.0` 后即可使用庆祝接口；现有 Kiss 调用无需修改。
+
 庆祝动画在 Android 14+ 硬件加速画布上使用 GPU Mesh；旧系统保留 Canvas 绘制。
 GPU 路径允许少量抗锯齿边缘像素差异，粒子数量、轨迹、颜色和时序不变。
 完整变更见 [CHANGELOG.md](CHANGELOG.md)，真机测量和适用范围见
@@ -218,6 +218,13 @@ View 本身不可点击、不可聚焦，`onTouchEvent` 始终返回 `false`。`
 软件 Canvas 保留原绘制路径。粒子数量、轨迹、颜色、层次和时序保持不变，GPU 路径允许
 少量抗锯齿边缘像素差异。已测设备的三轮完整帧验收通过，画面对比与适用边界见
 [庆祝性能验证](docs/celebration-performance.md)。测试期间请保持设备解锁、测试页面前台。
+
+## 飘雪（0.3.0 起）
+
+`ParticleEffect.twinklingSnow()` 绘制细雪与独立闪烁的星光，星光周期为 5.628 秒。
+`ParticleEffect.perspectiveSnow(amount = 500, speed = 0.9f)` 绘制向前飘落的白雪与六臂雪晶。
+Compose 使用 `AParticle(effect, trigger = isVisible, modifier = Modifier.fillMaxSize())` 控制播放。
+Android View 使用 `val playback = view.play(effect)` 开始，使用 `view.stop(playback)` 停止。
 
 ## License
 

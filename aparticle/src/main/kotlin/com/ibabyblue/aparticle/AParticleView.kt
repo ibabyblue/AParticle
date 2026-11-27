@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
 import android.util.AttributeSet
+import android.view.Choreographer
 import android.view.MotionEvent
 import android.view.View
 import com.ibabyblue.aparticle.internal.AnimatorScaleObserver
@@ -14,6 +15,13 @@ import com.ibabyblue.aparticle.internal.CelebrationPlan
 import com.ibabyblue.aparticle.internal.ParticleCanvasRenderer
 import com.ibabyblue.aparticle.internal.ParticleSimulation
 import com.ibabyblue.aparticle.internal.RiseAndBurstPlan
+import com.ibabyblue.aparticle.internal.SnowAtlas
+import com.ibabyblue.aparticle.internal.SnowField
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
 
@@ -35,6 +43,8 @@ public class AParticleView @JvmOverloads constructor(
         val effect: ParticleEffect,
         val seed: Long,
         var startNanos: Long = 0L,
+        var snow: SnowField? = null,
+        var snowLoad: Job? = null,
         var risePlan: RiseAndBurstPlan? = null,
         var atmospherePlan: AtmospherePlan? = null,
         var celebrationPlan: CelebrationPlan? = null,
@@ -43,6 +53,20 @@ public class AParticleView @JvmOverloads constructor(
     private val renderer = ParticleCanvasRenderer(context)
     private val celebrationRenderer = CelebrationCanvasRenderer()
     private val records = linkedMapOf<Long, Record>()
+    private var nextSnowFrame = 0L
+    private val snowFrame = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            if (!isAttachedToWindow || records.isEmpty()) return
+            if (frameTimeNanos + 500_000L >= nextSnowFrame) {
+                val interval = 16_666_667L
+                nextSnowFrame = if (nextSnowFrame == 0L || frameTimeNanos - nextSnowFrame > interval)
+                    frameTimeNanos + interval else nextSnowFrame + interval
+                invalidate()
+            } else {
+                Choreographer.getInstance().postFrameCallback(this)
+            }
+        }
+    }
     private var animationsEnabled = true
     private val animatorScaleObserver = AnimatorScaleObserver(context) { enabled ->
         if (animationsEnabled != enabled) {
@@ -92,13 +116,16 @@ public class AParticleView @JvmOverloads constructor(
 
     /** Stops one active or pending playback. Unknown and expired identities are safe no-ops. */
     public fun stop(playback: ParticlePlayback) {
-        records.remove(playback.id)
-        if (records.isEmpty()) invalidate()
+        records.remove(playback.id)?.snowLoad?.cancel()
+        invalidate()
     }
 
     /** Stops every playback owned by this view. */
     public fun stopAll() {
         if (records.isEmpty()) return
+        records.values.forEach { it.snowLoad?.cancel() }
+        Choreographer.getInstance().removeFrameCallback(snowFrame)
+        nextSnowFrame = 0L
         records.clear()
         invalidate()
     }
@@ -148,11 +175,16 @@ public class AParticleView @JvmOverloads constructor(
         super.onDraw(canvas)
         if (width <= 0 || height <= 0) return
         val now = System.nanoTime()
+        var hasReadySnow = false
+        var hasOtherEffects = false
         val iterator = records.values.iterator()
         while (iterator.hasNext()) {
             val record = iterator.next()
+            if (record.effect !is ParticleEffect.Snow) hasOtherEffects = true
+            if (record.snow != null) hasReadySnow = true
             if (record.startNanos == 0L) buildPlan(record, now)
             val elapsed = (now - record.startNanos).coerceAtLeast(0L) / 1_000_000_000f
+            record.snow?.draw(canvas, width.toFloat(), height.toFloat(), resources.displayMetrics.density, now)
             record.celebrationPlan?.let { plan ->
                 if (elapsed >= plan.duration) {
                     iterator.remove()
@@ -175,13 +207,25 @@ public class AParticleView @JvmOverloads constructor(
                 )
             }
         }
-        if (records.isNotEmpty()) postInvalidateOnAnimation()
+        val choreographer = Choreographer.getInstance()
+        choreographer.removeFrameCallback(snowFrame)
+        if (hasOtherEffects && records.isNotEmpty()) postInvalidateOnAnimation()
+        else if (hasReadySnow) choreographer.postFrameCallback(snowFrame)
     }
 
     private fun buildPlan(record: Record, startNanos: Long) {
         if (width <= 0 || height <= 0) return
         record.startNanos = startNanos
         when (val effect = record.effect) {
+            is ParticleEffect.Snow -> {
+                record.snowLoad = CoroutineScope(Dispatchers.Main.immediate).launch {
+                    val atlas = withContext(Dispatchers.Default) {
+                        SnowAtlas.load(resources, effect is ParticleEffect.PerspectiveSnow)
+                    }
+                    record.snow = SnowField(atlas, effect)
+                    postInvalidateOnAnimation()
+                }
+            }
             is ParticleEffect.Celebration -> {
                 celebrationRenderer.prepare()
                 record.celebrationPlan = CelebrationPlan(startNanos, !animationsEnabled, record.seed, effect.configuration)

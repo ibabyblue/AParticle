@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "io.github.ibabyblue"
-version = "0.2.0"
+version = "0.3.0"
 
 android {
     namespace = "com.ibabyblue.aparticle"

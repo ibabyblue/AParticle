@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun ParticleDemo(onCelebration: () -> Unit) {
+    var snow by remember { mutableStateOf<ParticleEffect.Snow?>(null) }
     var burstTrigger by remember { mutableIntStateOf(0) }
     var atmosphereActive by remember { mutableStateOf(true) }
     var shape by remember { mutableStateOf<ParticleShape>(ParticleShape.Heart) }
@@ -90,6 +91,14 @@ private fun ParticleDemo(onCelebration: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             Text("AParticle", style = MaterialTheme.typography.headlineLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = {
+                    snow = if (snow is ParticleEffect.PerspectiveSnow) null else ParticleEffect.perspectiveSnow()
+                }) { Text("Perspective snow") }
+                Button(onClick = {
+                    snow = if (snow == ParticleEffect.TwinklingSnow) null else ParticleEffect.twinklingSnow()
+                }) { Text("Twinkling snow") }
+            }
             Button(onClick = onCelebration) { Text("Celebration demo") }
             Text(
                 "Compose Canvas · transparent · touch passthrough",
@@ -123,6 +132,7 @@ private fun ParticleDemo(onCelebration: () -> Unit) {
             )
         }
 
+        snow?.let { AParticle(it, true, Modifier.matchParentSize()) }
         AParticle(
             effect = burst,
             trigger = burstTrigger,

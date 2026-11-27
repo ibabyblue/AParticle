@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0 - 2026-11-27
+
+- Add continuous twinkling and white perspective snowfall to the Compose and View APIs, matching IParticle 0.5.1.
+- Batch perspective flakes and morphing crystals in one texture mesh on Android 10 and later.
+
 ## 0.2.0 - 2026-09-21
 
 - Batch celebration artwork and explosion trails with GPU Mesh on hardware-accelerated Android 14+, preserving choreography and artwork with minor antialiasing edge differences; retain Canvas on older systems.

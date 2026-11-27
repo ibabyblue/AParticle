@@ -45,6 +45,9 @@ import kotlin.math.abs
  * each later distinct value replaces the previous celebration. System animation
  * scale zero selects twelve stationary fading stars for this effect only.
  *
+ * A [ParticleEffect.Snow] plays continuously while its Boolean trigger is true, the lifecycle
+ * is started and system animations are enabled.
+ *
  * The layer follows [modifier]'s bounds, does not affect sibling layout, does
  * not install pointer input, and clears animation when its lifecycle stops or
  * the system animator scale changes (celebration) or becomes zero (other effects).
@@ -58,6 +61,9 @@ public fun AParticle(
     val animationsEnabled = rememberAnimationsEnabled()
     val lifecycleActive = rememberLifecycleActive()
     when (effect) {
+        is ParticleEffect.Snow -> if (trigger == true && lifecycleActive && animationsEnabled) {
+            com.ibabyblue.aparticle.internal.SnowCanvas(effect, modifier)
+        }
         is ParticleEffect.Celebration -> CelebrationParticleCanvas(
             effect, trigger, animationsEnabled, lifecycleActive, modifier,
         )

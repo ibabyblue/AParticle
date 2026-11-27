@@ -5,6 +5,19 @@ import org.junit.Test
 
 class ConfigurationTest {
     @Test
+    fun perspectiveSnowUsesBoundedReferenceParameters() {
+        val default = ParticleEffect.perspectiveSnow()
+        assertEquals(500, default.amount)
+        assertEquals(0.9f, default.speed)
+        assertEquals(default, ParticleEffect.perspectiveSnow(speed = Float.NaN))
+        assertEquals(default, ParticleEffect.perspectiveSnow(speed = Float.POSITIVE_INFINITY))
+        assertEquals(120, ParticleEffect.perspectiveSnow(amount = Int.MIN_VALUE).amount)
+        assertEquals(600, ParticleEffect.perspectiveSnow(amount = Int.MAX_VALUE).amount)
+        assertEquals(.4f, ParticleEffect.perspectiveSnow(speed = -1f).speed)
+        assertEquals(1.4f, ParticleEffect.perspectiveSnow(speed = 2f).speed)
+    }
+
+    @Test
     fun particleColorResolvesEveryComponent() {
         val value = ParticleColor(Float.NaN, 2f, -1f, Float.POSITIVE_INFINITY)
 
